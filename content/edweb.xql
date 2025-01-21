@@ -863,6 +863,11 @@ declare %templates:wrap function edweb:load-objects(
 ) as map(*)
 {
     let $object-type := request:get-attribute("object-type")
+    (: if "order" is defined in controller.xql, else the order is "label". Processed in lines 899 & 905 :)
+    let $order :=
+        if (request:get-attribute("order") instance of xs:string)
+        then request:get-attribute("order")
+        else "label"
     let $model := local:load($model, "/api")
     let $appconf := $model?("/api")
     let $object-def := $appconf//appconf:object[@xml:id=$object-type]
@@ -890,12 +895,14 @@ declare %templates:wrap function edweb:load-objects(
         ))
 
     let $filter-params := edweb:params-load((map:keys($filters),"search","search-type"))
-    let $all-objects := edwebcontroller:api-get("/api/"||$object-type||"?show=all&amp;order=label")
+    let $all-objects := edwebcontroller:api-get(
+        "/api/"||$object-type||"?show=all&amp;order="||$order
+        )
     let $filtered-objects :=
         if (edweb:params-insert($filter-params) != "")
         then
             edwebcontroller:api-get(
-                "/api/"||$object-type||"?show=list&amp;order=label&amp;"
+                "/api/"||$object-type||"?show=list&amp;order="||$order||"&amp;"
                 ||edweb:params-insert($filter-params)
             )
         else $all-objects
