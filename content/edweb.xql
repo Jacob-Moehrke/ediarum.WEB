@@ -732,6 +732,108 @@ declare %templates:wrap function edweb:load-current-object(
         map:merge(($model, $map, $current-doc))
 };
 
+(:
+  Helper function to create an 18-digit key from an input string for sorting purposes.
+  The input should be in the format "Book Chapter,Verse-Chapter,Verse"
+  e.g., "Gn 2,10-14" or "2 Sm 18,17".
+  The 18 digits of the key are structured as follows:
+  00 - Book (numerical representation based on Vulgata order)
+  000 - Chapter (start of the range)
+  000 - Verse (start of the range)
+  00 - Optional letter suffix for the start verse (e.g., 'a', 'b')
+  000 - Chapter (end of the range, or placeholder if no range)
+  000 - Verse (end of the range, or placeholder if no range)
+  00 - Optional letter suffix for the end verse (or placeholder if no range)
+:)
+declare function local:order-vulgate(
+    $string as xs:string*
+) as xs:string* {
+    (: Map containing the book abbreviations (keys) sorted according to the Vulgata order
+       and their corresponding two-digit numerical values for sorting. :)
+    let $orderVulgata := map {
+        "Gn": "01", "Ex": "02", "Lv": "03", "Nm": "04", "Dt": "05", "Ios": "06", "Idc": "07",
+        "Rt": "08", "1Sm": "09", "2Sm": "10", "3Rg": "11", "4Rg": "12", "1Par": "13", "2Par": "14",
+        "1Esr": "15", "2Esr": "16", "Tb": "17", "Idt": "18", "Est": "19", "Iob": "20", "Ps": "21",
+        "Prv": "22", "Ecl": "23", "Ct": "24", "Sap": "25", "Sir": "26", "Is": "27", "Ier": "28",
+        "Lam": "29", "Bar": "30", "Ez": "31", "Dn": "32", "Os": "33", "Ioel": "34", "Am": "35",
+        "Abd": "36", "Ion": "37", "Mi": "38", "Na": "39", "Hab": "40", "So": "41", "Agg": "42",
+        "Za": "43", "Mal": "44", "1Mcc": "45", "2Mcc": "46", "Mt": "47", "Mc": "48", "Lc": "49",
+        "Io": "50", "Act": "51", "Rm": "52", "1Cor": "53", "2Cor": "54", "Gal": "55", "Eph": "56",
+        "Phil": "57", "Col": "58", "1Th": "59", "2Th": "60", "1Tim": "61", "2Tim": "62",
+        "Tit": "63", "Phlm": "64", "Hbr": "65", "Iac": "66", "1Pt": "67", "2Pt": "68", "1Io": "69",
+        "2Io": "70", "3Io": "71", "Iud": "72", "Apc": "73", "OrMan": "74", "3Esr": "75", "4Esr": "76",
+        "Ps151": "77", "Laod": "78"
+    }
+    (: Map containing lowercase letters and their corresponding two-digit numerical values for sorting.
+       This is used for a possible suffix to a verse number (e.g., 1,2b). :)
+    let $letterNumericMap := map {
+        "a": "01", "b": "02", "c": "03", "d": "04", "e": "05", "f": "06", "g": "07",
+        "h": "08", "i": "09", "j": "10", "k": "11", "l": "12", "m": "13", "n": "14",
+        "o": "15", "p": "16", "q": "17", "r": "18", "s": "19", "t": "20", "u": "21",
+        "v": "22", "w": "23", "x": "24", "y": "25", "z": "26"
+    }
+    
+    (: If there are multiple references in the input string, separated by ";",
+       only the first reference will be used for generating the sorting key. :)
+    let $ref := if (contains($string, ";")) then substring-before($string, ";") else $string
+    
+    (: Split the reference string into parts based on spaces.
+       This helps to separate the book abbreviation from the chapter and verse information. :)
+    let $parts := tokenize($ref, " ")
+    (: Extract the book abbreviation from the parts.
+        It handles cases where the book name might have a leading number (e.g., "1 Io")
+        or not (e.g., "Gn"). :)
+    let $key := 
+        if (count($parts) ge 1 and string-length($parts[1]) eq 1 and string-length($parts[2]) > 1) 
+            then $parts[1] || $parts[2]
+            else $parts[1]
+            
+    let $bookPosition := map:get($orderVulgata, $key)
+    let $chapterAndVerse := subsequence($parts, if ($key = $parts[1] || $parts[2]) then 3 else 2)
+    
+    (: If the $chapterAndVerse part contains a range indicated by "-", split it into two parts (start and end of the range). :)
+    let $rangeParts := tokenize($chapterAndVerse, "-")
+    let $firstPart := $rangeParts[1]
+    let $secondPart := if (exists($rangeParts[2])) then $rangeParts[2] else "00000000" (: The second part of the range, or a placeholder if no range. :)
+    
+    (: Process the first part (start of the range or single reference) to extract chapter, verse, and optional suffix.
+       Split the first part by comma to separate chapter and verse. :)
+    let $firstParts := tokenize($firstPart, ",")
+    let $chapter := if (count($firstParts) ge 0 and normalize-space($firstParts[1]) ne "")
+                    then format-number(xs:integer(replace($firstParts[1], "(\d+).*", "$1")), "000") (: Extract chapter number and format to three digits with leading zeros. :)
+                    else "000" (: Default chapter to "000" if not found or empty. :)
+    let $vers := if (count($firstParts) ge 1) then normalize-space($firstParts[2]) else "000" (: Extract verse number (and potential suffix) or default to "000". :)
+    
+    (: Extract the numerical part of the verse and format it to three digits with leading zeros. :)
+    let $versNumeric := if (matches($vers, "^\d+")) then format-number(xs:integer(replace($vers, "(\d+).*", "$1")), "000") else "000"
+    (: Check if the verse has a letter suffix (e.g., 12a) and get its numerical value from the $letterNumericMap.
+       Defaults to "00" if no suffix. :)
+    let $versSuffix := if (matches($vers, "^\d+[a-z]")) then map:get($letterNumericMap, replace($vers, "^\d+([a-z])", "$1")) else "00"
+    
+    (: Combine the extracted and formatted components of the first part into an eight-digit key:
+       three digits for chapter, three digits for verse number, and two digits for the verse suffix. :)
+    let $firstPartFormatted := concat($chapter, $versNumeric, $versSuffix)
+    
+    (: Process the second part of the range (if it exists) to create another eight-digit key.
+       This block is only executed if $secondPart was not set to the placeholder "00000000" (meaning a range exists). :)
+    let $secondPartFormatted := 
+        if ($secondPart ne "00000000") then (
+            let $secondParts := tokenize($secondPart, ",")
+            let $secondChapter := if (count($secondParts) ge 0 and normalize-space($secondParts[1]) ne "") then format-number(xs:integer(replace($secondParts[1], "(\d+).*", "$1")), "000") else "000"
+            let $secondVers := if (count($secondParts) ge 1) then normalize-space($secondParts[2]) else "000"
+            let $secondVersNumeric := if (matches($secondVers, "^\d+")) then format-number(xs:integer(replace($vers, "(\d+).*", "$1")), "000") else "000"
+            let $secondVersSuffix := if (matches($secondVers, "^\d+[a-z]")) then map:get($letterNumericMap, replace($vers, "^\d+([a-z])", "$1")) else "00"
+            return concat($secondChapter, $secondVersNumeric, $secondVersSuffix)
+         ) else 
+            $secondPart
+        
+    (: Finally, concatenate the book position, the formatted first part, and the formatted second part
+       to create the final 18-digit sorting key. :)
+    let $sortingKey := concat($bookPosition, $firstPartFormatted, $secondPartFormatted)
+    
+    return $sortingKey
+};
+
 (:~
  :
  :)
@@ -819,7 +921,9 @@ declare %templates:wrap function edweb:load-filter(
                 return     count($model?filtered[?filter?($filter-name)<=$this-label])
                 default
                 return 0
-        order by $l
+(: the condition filter-name = "bibleVulgate" triggers the sorting by the auxiliary function local:order-vulgate() :)
+        order by if ($filter-name eq "bibleVulgate") then local:order-vulgate($l)
+        else local:normalize-umlauts($l)
         return
             map:merge((
                 map:entry("label", $l),
