@@ -279,7 +279,13 @@ declare function edweb:add-link-to-prev-object(
     $model as map(*)
 ) 
 {
-    let $labelled-ids := $model?all[?label-pos=1]?id
+(: if sorting by "order" has been set to a value other than "label", this is adjusted for the navigationbar :)
+    let $order := request:get-attribute("order")
+    let $labelled-ids := 
+        if ($order eq 'lable') then
+            $model?all[?label-pos=1]?id
+        else
+            $model?all?id
     let $object-type := $model?object-type
     let $position := index-of( $labelled-ids, $model?id )
     return
@@ -296,7 +302,13 @@ declare function edweb:add-link-to-next-object(
     $model as map(*)
 ) 
 {
-    let $labelled-ids := $model?all[?label-pos=1]?id
+(: if sorting by "order" has been set to a value other than "label", this is adjusted for the navigationbar :)
+    let $order := request:get-attribute("order")
+    let $labelled-ids := 
+        if ($order eq 'lable') then
+            $model?all[?label-pos=1]?id
+        else
+            $model?all?id
     let $object-type := $model?object-type
     let $position := index-of( $labelled-ids, $model?id )
     return
